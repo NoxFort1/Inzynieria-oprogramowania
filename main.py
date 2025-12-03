@@ -4,11 +4,67 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import base64
+from google import genai
+from google.genai import types
 
-def alg(img1, img2): #img1 - cutout, img2 - ref
+UPLOAD_FOLDER = 'uploads'
+GOOGLE_API_KEY = "AIzaSyBVV1mBYTKHxTUBnXM0GBsPnSfz1sNWZek" 
+
+def googleApi(image_bytes):
     try:
-        cutoutColor = cv2.imread(f'./uploads/{img1}')
-        refColor = cv2.imread(f'./uploads/{img2}')
+        if not GOOGLE_API_KEY:
+            return "Błąd: Brak klucza API Gemini."
+
+        client = genai.Client(api_key=GOOGLE_API_KEY)
+
+        # Define the geolocation analysis prompt
+        geoPrompt = """
+        Jesteś ekspertem od geolokalizacji i analizy obrazu (OSINT). 
+        Twoim zadaniem jest przeanalizowanie zdjęcia i określenie jego lokalizacji.
+
+        1. ANALIZA: Przyjrzyj się architekturze, roślinności, znakom, ludziom i krajobrazowi.
+        2. OPIS: Stwórz krótki, wciągający opis dla użytkownika, wskazując detale zdradzające miejsce.
+        3. WERDYKT: Określ najbardziej prawdopodobną lokalizację.
+
+        SFORMATUJ ODPOWIEDŹ W NASTĘPUJĄCY SPOSÓB:
+
+        [OPIS]
+        (Tutaj 2-3 zdania opisu dla użytkownika)
+
+        [LOKALIZACJA]
+        Kraj: ...
+        Miasto/Region: ...
+        Konkretne miejsce: ...
+        Poziom pewności (Wysoki/Średni/Niski): ...
+
+        [SŁOWA KLUCZOWE]
+        (5-7 tagów oddzielonych przecinkami do wyszukiwarki, np.: góry, zima, jezioro)
+        """
+
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',  
+            config=types.GenerateContentConfig(
+                temperature=0.4,
+            ),
+            contents=[
+                types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type='image/jpeg',
+                ),
+                geoPrompt
+            ]
+        )
+        return response.text
+    except Exception as e:
+        return f"Błąd Gemini API: {str(e)}"
+
+def alg(img1_name, img2_name): # img1_name - cutout (plik), img2_name - ref (plik)
+    try:
+        path_cutout = os.path.join(UPLOAD_FOLDER, img1_name)
+        path_ref = os.path.join(UPLOAD_FOLDER, img2_name)
+
+        cutoutColor = cv2.imread(path_cutout)
+        refColor = cv2.imread(path_ref)
 
         if refColor is None or cutoutColor is None:
             return {"err": "Failed to load images"}
@@ -21,7 +77,6 @@ def alg(img1, img2): #img1 - cutout, img2 - ref
         refGray = clahe.apply(refGray)
         cutoutGray = clahe.apply(cutoutGray)
 
-        
     except cv2.error as err:
         return {"err": "Image processing error"}
 
@@ -45,44 +100,36 @@ def alg(img1, img2): #img1 - cutout, img2 - ref
 
     for matchPair in knnMatches:
         if len(matchPair) == 2:
-            m, n = matchPair  # m to pierwsze najlepsze dopasowanie a n to drugie
-            if m.distance < rThresh * n.distance:  # Jeśli m jest znacznie lepsze niż n (o 25%) to je  akceptujemy
+            m, n = matchPair
+            if m.distance < rThresh * n.distance:
                 good.append(m)
-
 
     # RANSAC
     minMatchCount = 10
 
     if len(good) > minMatchCount:
-        # Współrzędne punktów z 'cutout' (obraz "query")
         srcPts = np.float32([keyPointsCutout[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
-        # Współrzędne punktów z 'ref' (obraz "train")
         dstPts = np.float32([keyPointsRef[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
 
-        # homografia RANSAC
         M, mask = cv2.findHomography(srcPts, dstPts, cv2.RANSAC, 5.0)
 
         if M is None:
             return {"err": "Failed to find homography"}
 
-        # Maska inliers
         matchesMask = mask.ravel().tolist()
 
-        # Pobranie wymiarow obrazu  aby narysować ramkę
         h, w = cutoutGray.shape
-        #  rogi obrazu 'cutout'
         pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
-
-        # Przekształcenie rogow wycinka do perspektywy obrazu ref używając homografii M
         dst = cv2.perspectiveTransform(pts, M)
-    # ramka
+
+        # Ramka
         refColorWithBox = cv2.polylines(refColor.copy(), [np.int32(dst)], True, (0, 255, 255), 3, cv2.LINE_AA)
-        draw_params = dict(matchColor=(0, 255, 0),  # Zielone linie dla "inliers"
+        
+        draw_params = dict(matchColor=(0, 255, 0),
                         singlePointColor=None,
-                        matchesMask=matchesMask,  # dopasowania z maski RANSAC
+                        matchesMask=matchesMask,
                         flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
 
-        # finalny obraz z dopasowaniami (tylko inliers)
         imgMatches = cv2.drawMatches(cutoutColor, keyPointsCutout, refColorWithBox, keyPointsRef, good, None, **draw_params)
 
         success, buffer = cv2.imencode('.png', imgMatches)
@@ -91,48 +138,64 @@ def alg(img1, img2): #img1 - cutout, img2 - ref
 
         imgBase64 = base64.b64encode(buffer).decode('utf-8')
 
-        # cv2.imshow('Wynik dopasowania', imgMatches)
-        # cv2.waitKey(0)
+        try:
+            path_to_read = os.path.join(UPLOAD_FOLDER, img2_name) 
+            with open(path_to_read, 'rb') as f:
+                ref_image_bytes = f.read()
+            
+            gemini_response_text = googleApi(ref_image_bytes)
+        except Exception as api_err:
+            gemini_response_text = f"Błąd podczas wywoływania AI: {str(api_err)}"
+            print(gemini_response_text)
+
         return {
-                    "status": "success",
-                    "matches": len(good),
-                    "result": imgBase64
-                }
+            "status": "success",
+            "matches": len(good),
+            "result": imgBase64,
+            "geoInfo": gemini_response_text
+        }
     else:
         return {"err": f"Insufficient number of matches. Found {len(good)}, required {minMatchCount}."}
 
 
+# FLASK APP
 app = Flask(__name__)
 CORS(app)
 
-uploadFolder = 'uploads'
-if not  os.path.exists(uploadFolder):
-    os.makedirs(uploadFolder)
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
-app.config['uploadFolder'] = uploadFolder
-#ENDPOINT
+app.config['uploadFolder'] = UPLOAD_FOLDER
+
 @app.route('/api/przetworz', methods=['POST'])
 def handleUpload():
+    path1 = ""
+    path2 = ""
     try:
+        if 'obraz1' not in request.files or 'obraz2' not in request.files:
+            return jsonify({"Error": "Brak plików obraz1 lub obraz2"}), 400
+
         file1 = request.files['obraz1'] # cutout
         file2 = request.files['obraz2'] # ref
+        
         path1 = os.path.join(app.config['uploadFolder'], file1.filename)
         path2 = os.path.join(app.config['uploadFolder'], file2.filename)
+        
         file1.save(path1)
         file2.save(path2)
         
         result = alg(file1.filename, file2.filename)
 
-        os.remove(path1)
-        os.remove(path2)
+        if os.path.exists(path1): os.remove(path1)
+        if os.path.exists(path2): os.remove(path2)
 
         return jsonify(result)
-    
 
-    except Exception:
-        return jsonify({"Error": str(Exception)}, 500)
-    
+    except Exception as e:
+        if os.path.exists(path1): os.remove(path1)
+        if os.path.exists(path2): os.remove(path2)
+        print(f"BŁĄD SERWERA: {str(e)}") 
+        return jsonify({"Error": str(e)}), 500
 
 if __name__  == '__main__':
-    # server start
     app.run(debug=True, port=5000)
