@@ -27,7 +27,7 @@ Aplikacja webowa służąca do znajdowania lokalizacji małego wycinka obrazu (n
 ### Backend
 * **Python (Flask):** Lekki framework webowy do obsługi API REST.
 * **OpenCV (cv2):** Główna biblioteka do przetwarzania obrazów i implementacji algorytmów SIFT i RANSAC.
-* **Google Generative AI (Gemini API):** Integracja z multimodalnym modelem AI do analizy treści obrazów.
+* **Google Generative AI (Gemini API, model: gemini-2.5-flash):** Integracja z multimodalnym modelem AI do analizy treści obrazów.
 * **Flask-CORS:** Obsługa zapytań Cross-Origin między frontendem a backendem.
 
 ## Instalacja i Uruchomienie
