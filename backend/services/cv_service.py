@@ -3,10 +3,26 @@ import numpy as np
 import base64
 
 class ImageMatcher:
+<<<<<<< HEAD
     def process(self, path_cutout, path_ref):
         try:
             cutout_color = cv2.imread(path_cutout)
             ref_color = cv2.imread(path_ref)
+=======
+    def _decode_image(self, image_data):
+        try:
+            nparr = np.frombuffer(image_data, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            return img
+        except Exception:
+            return None
+        
+
+    def process(self, path_cutout, path_ref):
+        try:
+            cutout_color = self._decode_image(path_cutout)
+            ref_color = self._decode_image(path_ref)
+>>>>>>> c594f8b68f2b815bfa0b481812097726e3e52da9
 
             if ref_color is None or cutout_color is None:
                 return {"err": "Failed to load images"}
@@ -40,7 +56,11 @@ class ImageMatcher:
 
             min_match_count = 10
             
+<<<<<<< HEAD
             if len(good) >= min_match_count:
+=======
+            if len(good) > min_match_count:
+>>>>>>> c594f8b68f2b815bfa0b481812097726e3e52da9
                 src_pts = np.float32([kp_cutout[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
                 dst_pts = np.float32([kp_ref[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
 
