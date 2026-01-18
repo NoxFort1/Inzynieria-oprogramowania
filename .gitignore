@@ -1,0 +1,4 @@
+.venv_clean
+.env
+__pycache__/
+*.pyc

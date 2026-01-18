@@ -1,13 +1,8 @@
 flask
 flask-cors
 python-dotenv
-<<<<<<< HEAD
 opencv-python==4.10.0.84
 numpy==2.0.2
-google-generativeai>=0.8.0
+google-genai>=0.3.0
 pytest
 pytest-flask
-=======
-google-cloud-vision
-google-cloud-aiplatform
->>>>>>> c594f8b68f2b815bfa0b481812097726e3e52da9
